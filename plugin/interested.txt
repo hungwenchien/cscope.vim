@@ -44,6 +44,7 @@
 \.rb
 \.rc
 \.ru
+\.S
 \.sbt
 \.scala
 \.sh
@@ -57,6 +58,8 @@
 \.xsd
 \.y
 \.yml
+\.mk
 autohandler
 config
 dhandler
+Makefile

@@ -111,11 +111,6 @@ function! s:RmDBfiles()
 endfunction
 
 function! s:FlushIndex()
-  let lines = []
-  for d in keys(s:dbs)
-    call add(lines, d.'|'.s:dbs[d]['id'].'|'.s:dbs[d]['loadtimes'].'|'.s:dbs[d]['dirty'])
-  endfor
-  call writefile(lines, s:index_file)
 endfunction
 
 function! s:CheckNewFile(dir, newfile)
@@ -138,15 +133,16 @@ endfunction
 
 function! s:_CreateDB(dir, init)
   let id = s:dbs[a:dir]['id']
-  let cscope_files = s:cscope_vim_dir."/".id."_inc.files"
-  let cscope_db = s:cscope_vim_dir.'/'.id.'_inc.db'
-  if ! filereadable(cscope_files) || a:init
+  let cscope_files = s:cscope_vim_dir."/".id.".files"
+  let cscope_db = s:cscope_vim_dir.'/'.id.'.db'
+  let cscope_dir = s:cscope_vim_dir.'/'.id.'.dir'
+  if ! filereadable(cscope_files) || a:init == 1
     let cscope_files = s:cscope_vim_dir."/".id.".files"
     let cscope_db = s:cscope_vim_dir.'/'.id.'.db'
-    if ! filereadable(cscope_files)
+    let cscope_dir = s:cscope_vim_dir.'/'.id.'.dir'
+    call writefile([a:dir], cscope_dir)
       let files = <SID>ListFiles(a:dir)
       call writefile(files, cscope_files)
-    endif
   endif
   exec 'cs kill '.cscope_db
   redir @x
@@ -179,7 +175,7 @@ function! s:CheckAbsolutePath(dir, defaultPath)
 endfunction
 
 function! s:InitDB(dir)
-  let id = localtime()
+  let id = md5#md5(a:dir)
   let s:dbs[a:dir] = {}
   let s:dbs[a:dir]['id'] = id
   let s:dbs[a:dir]['loadtimes'] = 0
@@ -200,10 +196,11 @@ endfunction
 
 " 0 -- loaded
 " 1 -- cancelled
-function! s:AutoloadDB(dir)
+function! s:AutoloadDB(dir, create_db)
   let ret = 0
   let m_dir = <SID>GetBestPath(a:dir)
   if m_dir == ""
+   if a:create_db == 1
     echohl WarningMsg | echo "Can not find proper cscope db, please input a path to generate cscope db for." | echohl None
     let m_dir = input("", a:dir, 'dir')
     if m_dir != ''
@@ -213,6 +210,7 @@ function! s:AutoloadDB(dir)
     else
       let ret = 1
     endif
+   endif
   else
     let id = s:dbs[m_dir]['id']
     if cscope_connection(2, s:cscope_vim_dir.'/'.id.'.db') == 0
@@ -222,9 +220,9 @@ function! s:AutoloadDB(dir)
   return ret
 endfunction
 
-function! s:updateDBs(dirs)
+function! s:updateDBs(dirs, force_init)
   for d in a:dirs
-    call <SID>_CreateDB(d, 0)
+    call <SID>_CreateDB(d, a:force_init)
   endfor
   call <SID>FlushIndex()
 endfunction
@@ -250,13 +248,13 @@ function! s:listDBs()
   if len(dirs) == 0
     echo "You have no cscope dbs now."
   else
-    let s = [' ID                   LOADTIMES    PATH']
+    let s = [' ID                                         LOADTIMES    PATH']
     for d in dirs
       let id = s:dbs[d]['id']
       if cscope_connection(2, s:cscope_vim_dir.'/'.id.'.db') == 1
-        let l = printf("*%d  %10d            %s", id, s:dbs[d]['loadtimes'], d)
+        let l = printf("*%s  %10d            %s", id, s:dbs[d]['loadtimes'], d)
       else
-        let l = printf(" %d  %10d            %s", id, s:dbs[d]['loadtimes'], d)
+        let l = printf(" %s  %10d            %s", id, s:dbs[d]['loadtimes'], d)
       endif
       call add(s, l)
     endfor
@@ -268,29 +266,6 @@ function! s:loadIndex()
   let s:dbs = {}
   if ! isdirectory(s:cscope_vim_dir)
     call mkdir(s:cscope_vim_dir)
-  elseif filereadable(s:index_file)
-    let idx = readfile(s:index_file)
-    for i in idx
-      let e = split(i, '|')
-      if len(e) == 0
-        call delete(s:index_file)
-        call <SID>RmDBfiles()
-      else
-        let db_file = s:cscope_vim_dir.'/'.e[1].'.db'
-        if filereadable(db_file)
-          if isdirectory(e[0])
-            let s:dbs[e[0]] = {}
-            let s:dbs[e[0]]['id'] = e[1]
-            let s:dbs[e[0]]['loadtimes'] = e[2]
-            let s:dbs[e[0]]['dirty'] = (len(e) > 3) ? e[3] :0
-          else
-            call delete(db_file)
-          endif
-        endif
-      endif
-    endfor
-  else
-    call <SID>RmDBfiles()
   endif
 endfunction
 
@@ -305,6 +280,21 @@ function! s:preloadDB()
   endfor
 endfunction
 
+function! s:CscopeAutoLoad()
+  "let curp = expand('%:p:h')
+  let curp = getcwd()
+  let md5_id = md5#md5(curp)
+  let dbp = s:cscope_vim_dir.'/'.md5_id.'.db'
+  if filereadable(dbp)
+    let s:dbs = {}
+    let s:dbs[curp] = {}
+    let s:dbs[curp]['id'] = md5_id
+    let s:dbs[curp]['loadtimes'] = 0
+    let s:dbs[curp]['dirty'] = 0
+    call <SID>AutoloadDB(expand('%:p:h'), 0)
+  endif
+endfunction
+
 function! CscopeFind(action, word)
   let dirtyDirs = []
   for d in keys(s:dbs)
@@ -313,9 +303,9 @@ function! CscopeFind(action, word)
     endif
   endfor
   if len(dirtyDirs) > 0
-    call <SID>updateDBs(dirtyDirs)
+    call <SID>updateDBs(dirtyDirs, 0)
   endif
-  let dbl = <SID>AutoloadDB(expand('%:p:h'))
+  let dbl = <SID>AutoloadDB(expand('%:p:h'), 1)
   if dbl == 0
     try
       exe ':lcs f '.a:action.' '.a:word
@@ -347,14 +337,15 @@ function! s:onChange()
       let s:dbs[m_dir]['dirty'] = 1
       call <SID>FlushIndex()
       call <SID>CheckNewFile(m_dir, expand('%:p'))
-      redraw
+      redraw!
       call <SID>echo('Your cscope db will be updated automatically, you can turn off this message by setting g:cscope_silent 1.')
     endif
   endif
 endfunction
 
-function! CscopeUpdateDB()
-  call <SID>updateDBs(keys(s:dbs))
+function! CscopeUpdateDB(force_init)
+  call <SID>updateDBs(keys(s:dbs), a:force_init)
+  redraw!
 endfunction
 if exists('g:cscope_preload_path')
   call <SID>preloadDB()
@@ -369,7 +360,11 @@ set cscopequickfix=s-,g-,d-,c-,t-,e-,f-,i-
 function! s:listDirs(A,L,P)
   return keys(s:dbs)
 endfunction
-com! -nargs=? -complete=customlist,<SID>listDirs CscopeClear call <SID>clearDBs("<args>")
 
+com! -nargs=0 CscopeUpdateFull call CscopeUpdateDB(1)
+com! -nargs=0 CscopeUpdateQuick call CscopeUpdateDB(0)
 com! -nargs=0 CscopeList call <SID>listDBs()
+"com! -nargs=? -complete=customlist,<SID>listDirs CscopeRemoveDB call <SID>clearDBs("<args>")
+
 call <SID>loadIndex()
+call <SID>CscopeAutoLoad()
