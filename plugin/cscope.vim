@@ -3,6 +3,10 @@
 "    License: The MIT License
 "
 
+if !exists('g:cscope_run_cmd_only')
+  let g:cscope_run_cmd_only= 0
+endif
+
 if !exists('g:cscope_silent')
   let g:cscope_silent = 0
 endif
@@ -146,7 +150,7 @@ function! s:_CreateDB(dir, init)
   endif
   exec 'cs kill '.cscope_db
   redir @x
-  exec 'silent !'.g:cscope_cmd.' -b -i '.cscope_files.' -f'.cscope_db
+  exec 'silent !'.g:cscope_cmd.' -k -q -b -i '.cscope_files.' -f'.cscope_db
   redi END
   if @x =~ "\nCommand terminated\n"
     echohl WarningMsg | echo "Failed to create cscope database for ".a:dir.", please check if " | echohl None
@@ -225,6 +229,7 @@ function! s:updateDBs(dirs, force_init)
     call <SID>_CreateDB(d, a:force_init)
   endfor
   call <SID>FlushIndex()
+  redraw!
 endfunction
 
 function! s:clearDBs(dir)
@@ -297,6 +302,13 @@ endfunction
 
 function! CscopeFind(action, word)
   let dirtyDirs = []
+  if g:cscope_run_cmd_only == 1
+    exe ':lcs f '.a:action.' '.a:word
+    if g:cscope_open_location == 1
+      lw
+      return 0
+    endif
+  endif
   for d in keys(s:dbs)
     if s:dbs[d]['dirty'] == 1
       call add(dirtyDirs, d)
@@ -305,7 +317,7 @@ function! CscopeFind(action, word)
   if len(dirtyDirs) > 0
     call <SID>updateDBs(dirtyDirs, 0)
   endif
-  let dbl = <SID>AutoloadDB(expand('%:p:h'), 1)
+  let dbl = <SID>AutoloadDB(getcwd(), 1)
   if dbl == 0
     try
       exe ':lcs f '.a:action.' '.a:word
@@ -337,7 +349,7 @@ function! s:onChange()
       let s:dbs[m_dir]['dirty'] = 1
       call <SID>FlushIndex()
       call <SID>CheckNewFile(m_dir, expand('%:p'))
-      redraw!
+      redraw
       call <SID>echo('Your cscope db will be updated automatically, you can turn off this message by setting g:cscope_silent 1.')
     endif
   endif
