@@ -179,7 +179,7 @@ function! s:CheckAbsolutePath(dir, defaultPath)
 endfunction
 
 function! s:InitDB(dir)
-  let id = md5#md5(a:dir)
+  let id = sha256(a:dir)
   let s:dbs[a:dir] = {}
   let s:dbs[a:dir]['id'] = id
   let s:dbs[a:dir]['loadtimes'] = 0
@@ -288,7 +288,7 @@ endfunction
 function! s:CscopeAutoLoad()
   "let curp = expand('%:p:h')
   let curp = getcwd()
-  let md5_id = md5#md5(curp)
+  let md5_id = sha256(curp)
   let dbp = s:cscope_vim_dir.'/'.md5_id.'.db'
   if filereadable(dbp)
     let s:dbs = {}
@@ -355,6 +355,16 @@ function! s:onChange()
   endif
 endfunction
 
+function! CscopeUpdateQ()
+  let adir = expand('%:p:h')
+  let id = sha256(adir)
+  let s:dbs[adir] = {}
+  let s:dbs[adir]['id'] = id
+  let s:dbs[adir]['loadtimes'] = 0
+  let s:dbs[adir]['dirty'] = 0
+  call CscopeUpdateDB(0)
+endfunction
+
 function! CscopeUpdateDB(force_init)
   call <SID>updateDBs(keys(s:dbs), a:force_init)
   redraw!
@@ -374,7 +384,7 @@ function! s:listDirs(A,L,P)
 endfunction
 
 com! -nargs=0 CscopeUpdateFull call CscopeUpdateDB(1)
-com! -nargs=0 CscopeUpdateQuick call CscopeUpdateDB(0)
+com! -nargs=0 CscopeUpdateQuick call CscopeUpdateQ()
 com! -nargs=0 CscopeList call <SID>listDBs()
 "com! -nargs=? -complete=customlist,<SID>listDirs CscopeRemoveDB call <SID>clearDBs("<args>")
 
